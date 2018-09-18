@@ -19,32 +19,17 @@ package org.voltdb.sysprocs;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.*;
-import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
-import org.apache.calcite.sql.ddl.SqlCreateTable;
-import org.apache.calcite.sql.parser.SqlParseException;
-import org.apache.calcite.sql.parser.SqlParser;
+import org.voltcore.utils.Pair;
 import org.voltdb.ClientInterface.ExplainMode;
 import org.voltdb.ParameterSet;
 import org.voltdb.VoltDB;
-import org.voltdb.VoltType;
-import org.voltdb.calciteadapter.rel.VoltDBTable;
-import org.voltdb.catalog.Catalog;
-import org.voltdb.catalog.Column;
-import org.voltdb.catalog.Database;
-import org.voltdb.catalog.Table;
-import org.voltdb.catalog.org.voltdb.calciteadaptor.CatalogAdapter;
 import org.voltdb.client.ClientResponse;
 import org.voltdb.newplanner.SqlBatch;
-import org.voltdb.newplanner.SqlTask;
 import org.voltdb.parser.SQLLexer;
-import org.voltdb.sysprocs.org.voltdb.calciteadapter.ColumnType;
-import org.voltdb.utils.CatalogUtil;
 
 public class AdHoc extends AdHocNTBase {
 
@@ -140,8 +125,8 @@ public class AdHoc extends AdHocNTBase {
 
         // at this point assume all DDL
         assert(mix == AdHocSQLMix.ALL_DDL);
-
-        return runDDLBatch(sqlStatements);
+        // Since we are not going through Calcite, there is no need to update CalciteSchema.
+        return runDDLBatch(sqlStatements, new ArrayList<>());
     }
 
     /**
@@ -152,15 +137,17 @@ public class AdHoc extends AdHocNTBase {
      * @author Yiqun Zhang
      */
     private CompletableFuture<ClientResponse> runDDLBatchThroughCalcite(SqlBatch batch) {
-        // For now let's keep using the pre-existing parser for DDL.
-        List<String> sqlStatements = new ArrayList<>(batch.getTaskCount());
-        for (SqlTask task : batch) {
-            sqlStatements.add(task.getSQL());
-        }
-        return runDDLBatch(sqlStatements);
+        // We batch SqlNode with original SQL DDL stmts together, because we need both.
+        final List<Pair<String, SqlNode>> args =
+                StreamSupport.stream(batch.spliterator(), false)
+                .map(task -> Pair.of(task.getSQL(), task.getParsedQuery()))
+                .collect(Collectors.toList());
+        return runDDLBatch(args.stream().map(Pair::getFirst).collect(Collectors.toList()),
+                args.stream().map(Pair::getSecond).collect(Collectors.toList()));
     }
 
-    private CompletableFuture<ClientResponse> runDDLBatch(List<String> sqlStatements) {
+
+    private CompletableFuture<ClientResponse> runDDLBatch(List<String> sqlStatements, List<SqlNode> sqlNodes) {
         // conflictTables tracks dropped tables before removing the ones that don't have CREATEs.
         SortedSet<String> conflictTables = new TreeSet<>();
         Set<String> createdTables = new HashSet<>();
@@ -224,8 +211,7 @@ public class AdHoc extends AdHocNTBase {
         return updateApplication("@AdHoc",
                                 null,
                                 null,
-                                //sqlStatements.toArray(new String[0]),
-                sqlStatements.stream().filter(stmt -> !SQLLexer.extractDDLToken(stmt).equals("create")).collect(Collectors.toList()).toArray(new String[0]),
+                                sqlStatements.toArray(new String[0]), sqlNodes,
                                 null,
                                 false,
                                 true);

@@ -19,19 +19,41 @@ package org.voltdb.catalog.org.voltdb.calciteadaptor;
 
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.schema.SchemaPlus;
+import org.voltdb.calciteadapter.rel.VoltDBIndex;
+import org.voltdb.calciteadapter.rel.VoltDBMatViewInfo;
 import org.voltdb.calciteadapter.rel.VoltDBTable;
 import org.voltdb.catalog.Database;
-import org.voltdb.catalog.Table;
 
+
+/**
+ * This is the common adaptor that VoltDB should query any catalog object from.
+ * It is built around the <code>org.voltdb.catalog.Database</code> instance in sync
+ * with any DDL operations. Taken/adapted from Mike A.
+ *
+ * NOTE that VoltDB creates a new Catalog/Database instance on every DDL stmt. (See
+ * <code>org.voltdb.compiler.VoltCompiler.loadSchema</code> method. In future, we
+ * might save some trouble by avoid creating all catalog objects (tables, views, indexes,
+ * etc.) from scratch upon a new DDL batch/stmt.
+ */
 public class CatalogAdapter {
-    // NOTE: VoltDB creates a new Catalog/Database instance on every DDL stmt. See VoltCompiler.loadSchema()
+    /**
+     * Creates a brand new SchemaPlus instance upon new VoltDB Database catalog.
+     *
+     * CalciteSchema is capable of caching; but we disable it for now since
+     * <code>org.apache.calcite.schema.SchemaPlus</code> instance is forced
+     * refreshed upon every new DDL batch/stmt.
+     */
     public static SchemaPlus schemaPlusFromDatabase(Database db) {
-        // addMetadataSchema = false; cache = true
         final SchemaPlus rootSchema =
                 CalciteSchema.createRootSchema(false, false, db.getSchema()).plus();
         // Get all tables from database
-        db.getTables().forEach(table -> rootSchema.add(table.getTypeName(), new VoltDBTable(table)));
-        // Get all indexes from database
+        db.getTables().forEach(table -> {
+            rootSchema.add(table.getTypeName(), new VoltDBTable(table));
+            // Lift all table-associated catalog objects to global visible level, might be convenient for planning use.
+            table.getIndexes().forEach(index -> rootSchema.add(index.getTypeName(), new VoltDBIndex(index)));
+            table.getViews().forEach(mv -> rootSchema.add(mv.getTypeName(), new VoltDBMatViewInfo(mv)));
+            // TODO: Get all functions, etc. from database
+        });
         return rootSchema;
     }
 
