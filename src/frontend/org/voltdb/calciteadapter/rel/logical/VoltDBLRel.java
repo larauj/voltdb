@@ -21,9 +21,12 @@ import org.apache.calcite.plan.Convention;
 import org.apache.calcite.rel.RelNode;
 
 /**
- * From Mike A. A RelNode interface added with calling convention trait.
+ * A RelNode interface with the VoltDB logical relational node trait.
+ * @since 8.4
+ * @author Michael Alexeev
  */
 public interface VoltDBLRel extends RelNode  {
+
     final static Convention VOLTDB_LOGICAL = new Convention.Impl("VOLTDB_LOGICAL", VoltDBLRel.class);
 
 }
