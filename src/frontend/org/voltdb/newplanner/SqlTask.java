@@ -44,7 +44,15 @@ public class SqlTask {
         }
         m_sqlString = sql;
         SqlParser parser = ParserFactory.create(sql);
-        m_parsedQuery = parser.parseStmt();
+        try {
+            m_parsedQuery = parser.parseStmt();
+        } catch (SqlParseException e) { // Make error for unsupported syntax error message (> 20 lines) shorter
+            final int truncateMsgSize = 81;
+            final String longMsg = e.getMessage(),
+                    shortMsg = String.format("%s\n...\n%s", longMsg.substring(0, truncateMsgSize),
+                            longMsg.substring(longMsg.length() - truncateMsgSize));
+            throw new SqlParseException(shortMsg, e.getPos(), e.getExpectedTokenSequences(),e.getTokenImages(), e.getCause());
+        }
     }
 
     /**
